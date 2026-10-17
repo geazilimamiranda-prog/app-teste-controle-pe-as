@@ -27,8 +27,8 @@ data_exemplo = {
         "Motor Elétrico 2HP"
     ],
     "Categoria": ["Desgaste", "Recomendada", "Eletrônica", "Crítica"],
-    "MTBF (Horas)": [8000, 15000, 20000, 40000],
-    "Horas Trabalhadas": [7200, 14200, 19500, 35000],  # Horas acumuladas em cada peça
+    "MTBF": [8000, 15000, 20000, 40000],
+    "Horas Trabalhadas": [7200, 14200, 19500, 35000],
     "Lead Time (semanas)": [2, 4, 1, 8],
     "Criticidade": ["Alta", "Média", "Alta", "Alta"],
     "Fornecedor": ["Correias Industrial S.A.", "Rolamentos & Cia", "Sensors & Automation", "Motores Industriais Ltda"],
@@ -50,19 +50,43 @@ uploaded_file = st.sidebar.file_uploader("Carregar Tabela Excel (.xlsx)", type=[
 if uploaded_file is not None:
     try:
         df_up = pd.read_excel(uploaded_file)
-        cols_check = {
-            "Horas Trabalhadas": 0,
-            "Fornecedor": "Não Cadastrado",
-            "E-mail Fornecedor": "fornecedor@email.com",
-            "Data Última Troca": "Instalação Inicial"
-        }
-        for c, val in cols_check.items():
-            if c not in df_up.columns:
-                df_up[c] = val
         st.session_state["df_pecas"] = df_up
         st.sidebar.success("Excel carregado com sucesso!")
     except Exception as e:
         st.sidebar.error(f"Erro ao ler arquivo: {e}")
+
+# Processamento e padronização dos nomes das colunas
+df = st.session_state["df_pecas"].copy()
+
+# Mapear e renomear variações de nomes de colunas
+renomear_colunas = {}
+for col in df.columns:
+    col_clean = str(col).strip()
+    if col_clean.lower() in ["mtbf", "mtbf (horas)", "mtbf(h)"]:
+        renomear_colunas[col] = "MTBF"
+    elif col_clean.lower() in ["horas trabalhadas", "horas da peça", "horas peca", "horas acumuladas"]:
+        renomear_colunas[col] = "Horas Trabalhadas"
+
+df = df.rename(columns=renomear_colunas)
+
+# Garantir a criação das colunas caso não existam no arquivo importado
+if "MTBF" not in df.columns:
+    df["MTBF"] = 10000
+
+if "Horas Trabalhadas" not in df.columns:
+    df["Horas Trabalhadas"] = 0
+
+if "Fornecedor" not in df.columns:
+    df["Fornecedor"] = "Não Cadastrado"
+
+if "E-mail Fornecedor" not in df.columns:
+    df["E-mail Fornecedor"] = "fornecedor@email.com"
+
+if "Data Última Troca" not in df.columns:
+    df["Data Última Troca"] = "Instalação Inicial"
+
+# Atualizar o session_state com o dataframe padronizado
+st.session_state["df_pecas"] = df
 
 # Parâmetros da Fábrica
 st.sidebar.divider()
@@ -70,7 +94,7 @@ st.sidebar.header("⏱️ Regime da Máquina")
 regime_diario = st.sidebar.slider("Horas de Trabalho / Dia:", min_value=8, max_value=24, value=16)
 dias_semana = st.sidebar.slider("Dias de Operação / Semana:", min_value=5, max_value=7, value=6)
 
-# Horímetro Geral (Opcional para somar horas em todas as peças simultaneamente)
+# Horímetro Geral
 st.sidebar.divider()
 st.sidebar.subheader("🕹️ Avançar Horímetro Geral")
 inc_horas = st.sidebar.number_input("Adicionar Horas a Todos os Itens:", min_value=0, value=0, step=50)
@@ -82,24 +106,22 @@ if st.sidebar.button("➕ Aplicar Horas na Máquina"):
 # ----------------------------------------------------
 # 2. ENGENHARIA DE CÁLCULO
 # ----------------------------------------------------
-df = st.session_state["df_pecas"]
-
-df["MTBF (Horas)"] = pd.to_numeric(df["MTBF (Horas)"], errors="coerce")
-df["Horas Trabalhadas"] = pd.to_numeric(df["Horas Trabalhadas"], errors="coerce")
-df["Lead Time (semanas)"] = pd.to_numeric(df["Lead Time (semanas)"], errors="coerce")
+df["MTBF"] = pd.to_numeric(df["MTBF"], errors="coerce").fillna(0)
+df["Horas Trabalhadas"] = pd.to_numeric(df["Horas Trabalhadas"], errors="coerce").fillna(0)
+df["Lead Time (semanas)"] = pd.to_numeric(df["Lead Time (semanas)"], errors="coerce").fillna(1)
 
 # Conversão do Lead Time em Horas de Trabalho Efetivas
 df["Lead Time (Horas)"] = df["Lead Time (semanas)"] * dias_semana * regime_diario
-df["Gatilho Compra (Horas)"] = df["MTBF (Horas)"] - df["Lead Time (Horas)"]
+df["Gatilho Compra (Horas)"] = df["MTBF"] - df["Lead Time (Horas)"]
 
-df["Vida Útil Restante (h)"] = df["MTBF (Horas)"] - df["Horas Trabalhadas"]
+df["Vida Útil Restante (h)"] = df["MTBF"] - df["Horas Trabalhadas"]
 df["Horas Restantes p/ Compra"] = df["Gatilho Compra (Horas)"] - df["Horas Trabalhadas"]
 
 df["Dias Restantes p/ Compra"] = df["Horas Restantes p/ Compra"] / regime_diario
 df["Dias Restantes p/ Troca"] = df["Vida Útil Restante (h)"] / regime_diario
 
-df["% Consumido"] = (df["Horas Trabalhadas"] / df["MTBF (Horas)"]) * 100
-df["% Consumido"] = df["% Consumido"].apply(lambda x: min(100.0, max(0.0, float(x))))
+df["% Consumido"] = (df["Horas Trabalhadas"] / df["MTBF"]) * 100
+df["% Consumido"] = df["% Consumido"].apply(lambda x: min(100.0, max(0.0, float(x))) if pd.notnull(x) else 0.0)
 
 def classificar_status(row):
     if row["Vida Útil Restante (h)"] <= 0:
@@ -141,17 +163,14 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📜 6. Histórico de Requisições"
 ])
 
-# ----------------------------------------------------
-# TAB 1: MONITORAMENTO INDIVIDUAL DE HORAS TRABALHADAS
-# ----------------------------------------------------
+# TAB 1: MONITORAMENTO
 with tab1:
     st.subheader("📊 Painel de Monitoramento Individual de Horas Trabalhadas")
-    st.markdown("Você pode **editar diretamente na tabela abaixo** a quantidade de *Horas Trabalhadas* de qualquer item para atualizar seu status instantaneamente:")
+    st.markdown("Altere abaixo as **Horas Trabalhadas** de qualquer item para atualizar o status em tempo real:")
 
-    # Permitir edição direta do horímetro de cada peça
     df_edit_horas = st.data_editor(
-        df[["Código SAP", "Descrição", "Horas Trabalhadas", "MTBF (Horas)", "Vida Útil Restante (h)", "Status de Manutenção"]],
-        disabled=["Código SAP", "Descrição", "MTBF (Horas)", "Vida Útil Restante (h)", "Status de Manutenção"],
+        df[["Código SAP", "Descrição", "Horas Trabalhadas", "MTBF", "Vida Útil Restante (h)", "Status de Manutenção"]],
+        disabled=["Código SAP", "Descrição", "MTBF", "Vida Útil Restante (h)", "Status de Manutenção"],
         use_container_width=True,
         key="editor_horas_trabalhadas"
     )
@@ -176,9 +195,7 @@ with tab1:
     fig.update_layout(xaxis=dict(range=[0, 100]), height=300)
     st.plotly_chart(fig, use_container_width=True)
 
-# ----------------------------------------------------
-# TAB 2: CADASTRO DE FORNECEDORES
-# ----------------------------------------------------
+# TAB 2: FORNECEDORES
 with tab2:
     st.subheader("🏷️ Cadastro e Edição de Fornecedores por Peça")
     st.markdown("Preencha ou altere o **Nome do Fornecedor** e o **E-mail de Contato** de cada componente:")
@@ -197,16 +214,13 @@ with tab2:
         st.success("Cadastro de Fornecedores salvo com sucesso!")
         st.rerun()
 
-# ----------------------------------------------------
 # TAB 3: SOLICITAÇÃO DE COTAÇÃO
-# ----------------------------------------------------
 with tab3:
     st.subheader("📩 Selecionar Peças e Enviar Solicitação de Orçamento")
     st.markdown("Marque os itens que deseja cotar abaixo:")
 
     df_selecao = df.copy()
     df_selecao.insert(0, "Selecionar", False)
-    # Selecionar automaticamente os que precisam de compra
     df_selecao.loc[df_selecao["Horas Restantes p/ Compra"] <= 0, "Selecionar"] = True
 
     df_editado = st.data_editor(
@@ -266,9 +280,7 @@ with tab3:
                     st.success(f"Registrado com sucesso no Histórico!")
                     st.rerun()
 
-# ----------------------------------------------------
-# TAB 4: REPOSIÇÃO / RESET DE PEÇA
-# ----------------------------------------------------
+# TAB 4: REPOSIÇÃO / RESET
 with tab4:
     st.subheader("🛠️ Registrar Reposição de Peça e Zerar Horas Trabalhadas")
     
@@ -298,25 +310,21 @@ with tab4:
         st.success(f"✅ Horas do item {item_troca} resetadas com sucesso!")
         st.rerun()
 
-# ----------------------------------------------------
 # TAB 5: SIMULADOR
-# ----------------------------------------------------
 with tab5:
     st.subheader("🔮 Simulador de Carga de Trabalho")
     sim_h = st.number_input("Simular avanço de operação (Horas):", min_value=0, value=1000, step=100)
     
     df_s = df.copy()
     df_s["Horas Simuladas"] = df_s["Horas Trabalhadas"] + sim_h
-    df_s["Vida Útil Restante Simulada"] = df_s["MTBF (Horas)"] - df_s["Horas Simuladas"]
+    df_s["Vida Útil Restante Simulada"] = df_s["MTBF"] - df_s["Horas Simuladas"]
     df_s["Status Simulado"] = df_s.apply(
         lambda r: "🔴 VENCIDO" if r["Vida Útil Restante Simulada"] <= 0 
         else ("🟡 COMPRAR" if r["Vida Útil Restante Simulada"] <= r["Lead Time (Horas)"] else "🟢 OK"), axis=1
     )
     st.dataframe(df_s[["Código SAP", "Descrição", "Horas Trabalhadas", "Horas Simuladas", "Vida Útil Restante Simulada", "Status Simulado"]], use_container_width=True)
 
-# ----------------------------------------------------
 # TAB 6: HISTÓRICO
-# ----------------------------------------------------
 with tab6:
     st.subheader("📜 Histórico Geral de Transações")
     if len(st.session_state["historico_requisicoes"]) > 0:
