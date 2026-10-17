@@ -6,13 +6,13 @@ from datetime import datetime, timedelta
 
 # Configuração da página
 st.set_page_config(
-    page_title="Gestão & Plano de Manutenção Indústria 4.0",
+    page_title="Gestão & Simulador - Indústria 4.0",
     page_icon="⚙️",
     layout="wide"
 )
 
-st.title("⚙️ Sistema Integrado de Gestão, Compras & Manutenção 4.0")
-st.subheader("Controle Contínuo de Ciclo de Vida, Histórico de Requisições e Reset de Peças")
+st.title("⚙️ Sistema Integrado de Gestão, Compras & Simulação 4.0")
+st.subheader("Monitoramento de Ciclo de Vida, Emissão Automática de OCs e Simulador de Cenários")
 
 # ----------------------------------------------------
 # INICIALIZAÇÃO DO ESTADO DA SESSÃO (SESSION STATE)
@@ -65,10 +65,10 @@ df["Horas da Peça"] = pd.to_numeric(df["Horas da Peça"], errors="coerce")
 
 # Parâmetros de operação do equipamento
 st.sidebar.divider()
-st.sidebar.header("⏱️ Parâmetros Operacionais")
+st.sidebar.header("⏱️ Parâmetros Operacionais Atuais")
 
 regime_diario = st.sidebar.slider(
-    "Regime Operacional (Horas por Dia):",
+    "Regime Operacional Real (Horas por Dia):",
     min_value=8,
     max_value=24,
     value=16
@@ -123,15 +123,16 @@ m1, m2, m3, m4 = st.columns(4)
 m1.metric("Itens Monitorados", len(df))
 m2.metric("Ordens de Compra Pendentes", len(df[df["Horas Restantes para Compra"] <= 0]))
 m3.metric("Peças Vencidas", len(df[df["Vida Útil Restante (h)"] <= 0]))
-m4.metric("Requisições Registradas no Histórico", len(st.session_state["historico_requisicoes"]))
+m4.metric("Requisições Registradas", len(st.session_state["historico_requisicoes"]))
 
 st.divider()
 
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📊 Status Detalhado dos Itens", 
-    "🛠️ Registro de Manutenção & Reposição (Reset)", 
-    "📅 Plano de Paradas & Emissão de Pedidos",
-    "📜 Histórico de Requisições (Suprimentos & Analytics)"
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📊 Status Detalhado", 
+    "🛠️ Reposição & Reset", 
+    "🔮 Simulador de Cenários",
+    "📅 Planos & Emissão de OCs",
+    "📜 Histórico de Requisições"
 ])
 
 with tab1:
@@ -161,41 +162,74 @@ with tab1:
 
 with tab2:
     st.subheader("🛠️ Registrar Substituição de Peça (Reset de Vida Útil)")
-    st.markdown("Utilize este formulário ao realizar a manutenção preventiva/corretiva de um componente. A contagem de horas do item será **zerada** e seu status mudará automaticamente para **🟢 Operação Normal**.")
+    st.markdown("Ao efetuar a troca de um componente, registe aqui para que as horas voltem a contar do zero e o status passe automaticamente para **🟢 Operação Normal**.")
     
     col_reg1, col_reg2 = st.columns(2)
     
     with col_reg1:
         peca_reposicao = st.selectbox("Selecione a Peça Substituída:", df["Descrição"].unique())
         data_troca = st.date_input("Data da Manutenção / Reposição:", datetime.now())
-        tecnico_responsavel = st.text_input("Técnico / Engenheiro Responsável:", "Equipe de Manutenção")
+        tecnico_responsavel = st.text_input("Técnico / Responsável:", "Equipe de Manutenção")
         
     with col_reg2:
-        observacoes = st.text_area("Observações da Manutenção:", "Substituição preventiva efetuada conforme plano.")
+        observacoes = st.text_area("Observações:", "Substituição preventiva efetuada com sucesso.")
         horas_iniciais_nova_peca = st.number_input("Horas Iniciais da Nova Peça (h):", value=0, min_value=0)
 
-    if st.button("🔄 Confirmar Reposição & Resetar Horas da Peça"):
-        # Atualiza as horas e a data de troca no dataframe
+    if st.button("🔄 Confirmar Reposição & Resetar Horas"):
         idx = df[df["Descrição"] == peca_reposicao].index[0]
         st.session_state["df_pecas"].loc[idx, "Horas da Peça"] = horas_iniciais_nova_peca
         st.session_state["df_pecas"].loc[idx, "Data Última Troca"] = data_troca.strftime("%d/%m/%Y")
         
-        # Registrar no histórico de eventos
         st.session_state["historico_requisicoes"].append({
             "Data Evento": datetime.now().strftime("%d/%m/%Y %H:%M"),
             "Tipo": "REPOSIÇÃO / MANUTENÇÃO",
             "Código SAP": df.loc[idx, "Código SAP"],
             "Descrição": peca_reposicao,
             "Solicitante / Técnico": tecnico_responsavel,
-            "Observação": f"Peça substituída. Horas resetadas para {horas_iniciais_nova_peca}h. Obs: {observacoes}"
+            "Observação": f"Peça reposta. Horas resetadas para {horas_iniciais_nova_peca}h. Obs: {observacoes}"
         })
         
-        st.success(f"✅ Reposição registrada com sucesso! A vida útil do item **{peca_reposicao}** foi resetada.")
+        st.success(f"✅ Reposição efetuada com sucesso! A vida útil do componente **{peca_reposicao}** foi reiniciada.")
         st.rerun()
 
 with tab3:
-    st.subheader("📅 Plano Previsto de Paradas & Emissão de Requisição")
-    st.markdown("Gere requisições de compra para peças que atingiram a margem do Lead Time e registre a solicitação no banco de dados para rastreabilidade de compras.")
+    st.subheader("🔮 Simulador de Cenários Operacionais")
+    st.markdown("Simule o comportamento do equipamento sob diferentes condições futuras (ex: aumento de turnos, aceleração de desgaste ou alteração de *Lead Time*) sem afetar os dados reais.")
+
+    sim_col1, sim_col2 = st.columns(2)
+    with sim_col1:
+        adicionar_horas_sim = st.number_input("Simular avanço de horas de operação (h):", min_value=0, value=1000, step=100)
+        novo_regime_sim = st.slider("Simular Regime Diário (h/dia):", min_value=8, max_value=24, value=regime_diario)
+    with sim_col2:
+        fator_desgaste = st.slider("Fator de Carga / Severidade Operacional:", min_value=0.5, max_value=2.0, value=1.0, step=0.1)
+
+    # Criar DataFrame simulado baseado no atual
+    df_sim = df.copy()
+    df_sim["Horas Simuladas"] = df_sim["Horas da Peça"] + (adicionar_horas_sim * fator_desgaste)
+    df_sim["Vida Útil Restante Simulada (h)"] = df_sim["MTBF"] - df_sim["Horas Simuladas"]
+    df_sim["% Consumida Simulada"] = (df_sim["Horas Simuladas"] / df_sim["MTBF"]) * 100
+    df_sim["% Consumida Simulada"] = df_sim["% Consumida Simulada"].apply(lambda x: min(100.0, max(0.0, float(x))))
+
+    def status_sim(row):
+        if row["Vida Útil Restante Simulada (h)"] <= 0:
+            return "🔴 VENCIDO NO CENÁRIO"
+        elif row["Vida Útil Restante Simulada (h)"] <= (row["Lead Time (semanas)"] * 6 * novo_regime_sim):
+            return "🟡 COMPRA NECESSÁRIA NO CENÁRIO"
+        else:
+            return "🟢 OK NO CENÁRIO"
+
+    df_sim["Status Simulado"] = df_sim.apply(status_sim, axis=1)
+
+    st.markdown("#### 📊 Resultados da Simulação")
+    colunas_sim_display = [
+        "Código SAP", "Descrição", "Horas da Peça", "Horas Simuladas", 
+        "Vida Útil Restante Simulada (h)", "% Consumida Simulada", "Status Simulado"
+    ]
+    st.dataframe(df_sim[colunas_sim_display], use_container_width=True)
+
+with tab4:
+    st.subheader("📅 Plano de Paradas & Emissão Automática de Requisições")
+    st.markdown("Emita ordens de compra de forma automatizada para todos os itens que atingiram o limite do *Lead Time*.")
 
     df_plano = df.sort_values(by="Vida Útil Restante (h)").copy()
     
@@ -203,49 +237,54 @@ with tab3:
         dias_troca = int(item["Dias Restantes para Falha/Troca"])
         
         if dias_troca <= 0:
-            st.error(f"🚨 **PARADA IMEDIATA:** Substituir **{item['Descrição']}** (`{item['Código SAP']}`). Limite do MTBF esgotado.")
+            st.error(f"🚨 **PARADA IMEDIATA:** Substituir **{item['Descrição']}** (`{item['Código SAP']}`). Limite MTBF atingido.")
         elif dias_troca <= 15:
-            st.warning(f"⚠️ **Parada Próxima (~{dias_troca} dias - {item['Data Estimada de Troca/Parada']}):** Substituir **{item['Descrição']}**. Verifique se a Ordem de Compra foi emitida.")
+            st.warning(f"⚠️ **Parada Próxima (~{dias_troca} dias - {item['Data Estimada de Troca/Parada']}):** Substituir **{item['Descrição']}**.")
         else:
-            st.success(f"🟢 **Parada Futura (~{dias_troca} dias - {item['Data Estimada de Troca/Parada']}):** Manutenção planejada para **{item['Descrição']}**.")
+            st.success(f"🟢 **Parada Futura (~{dias_troca} dias - {item['Data Estimada de Troca/Parada']}):** Manutenção planeada para **{item['Descrição']}**.")
 
     st.divider()
-    st.subheader("📩 Emissão de Requisição de Compra / Cotação")
+    st.subheader("⚡ Painel de Ações de Suprimentos")
     
     pecas_para_compra = df[df["Horas Restantes para Compra"] <= 0]
     
-    if not pecas_para_compra.empty:
-        st.warning(f"Existem **{len(pecas_para_compra)}** peça(s) no momento crítico de compra!")
-        if st.button("📦 Emitir Requisição de Compra Automática"):
-            for _, item in pecas_para_compra.iterrows():
-                st.session_state["historico_requisicoes"].append({
-                    "Data Evento": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                    "Tipo": "ORDEM DE COMPRA / REQUISIÇÃO",
-                    "Código SAP": item["Código SAP"],
-                    "Descrição": item["Descrição"],
-                    "Solicitante / Técnico": "Sistema Preditivo Autônomo",
-                    "Observação": f"Requisição gerada pelo gatilho do Lead Time ({item['Lead Time (semanas)']} sem). Horas Atuais: {item['Horas da Peça']}h."
-                })
-            st.success(" Ordem de Compra/Cotação registrada com sucesso no Histórico do Sistema!")
-            st.rerun()
-    else:
-        st.info("Nenhuma peça atingiu a margem crítica do Lead Time neste momento.")
+    col_A, col_B = st.columns(2)
+    with col_A:
+        st.write(f"**Itens que exigem emissão imediata de O.C.:** {len(pecas_para_compra)}")
+    with col_B:
+        # Botão dedicado e destacado para emissão automática em massa
+        if st.button("🚀 Emitir Requisições Automáticas em Massa (Todas as Pendentes)", type="primary"):
+            if not pecas_para_compra.empty:
+                count = 0
+                for _, item in pecas_para_compra.iterrows():
+                    st.session_state["historico_requisicoes"].append({
+                        "Data Evento": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                        "Tipo": "ORDEM DE COMPRA AUTOMÁTICA",
+                        "Código SAP": item["Código SAP"],
+                        "Descrição": item["Descrição"],
+                        "Solicitante / Técnico": "Sistema Autônomo Indústria 4.0",
+                        "Observação": f"Requisição gerada por atingir o Lead Time de {item['Lead Time (semanas)']} semanas. Horas atuais: {item['Horas da Peça']}h."
+                    })
+                    count += 1
+                st.success(f"Sucesso! {count} requisição(ões) de compra foram emitidas automaticamente e registadas no histórico.")
+                st.rerun()
+            else:
+                st.info("Não existem itens pendentes de emissão de O.C. no momento.")
 
-with tab4:
-    st.subheader("📜 Histórico Geral de Requisições e Manutenções")
-    st.markdown("Registro completo de todas as solicitações de compra e trocas realizadas. Esta base serve para futuras análises de **Business Intelligence (BI)**, **Custo Total de Propriedade (TCO)** e modelos de **Machine Learning**.")
+with tab5:
+    st.subheader("📜 Histórico de Requisições e Compras (Analytics)")
+    st.markdown("Registo centralizado de todas as transações, ordens de compra emitidas e intervenções realizadas. Ideal para auditorias e futuras análises de inteligência de manutenção.")
     
     if len(st.session_state["historico_requisicoes"]) > 0:
         df_hist = pd.DataFrame(st.session_state["historico_requisicoes"])
         st.dataframe(df_hist, use_container_width=True)
         
-        # Opção de exportação para CSV
         csv = df_hist.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="📥 Baixar Histórico de Requisições (CSV)",
+            label="📥 Exportar Histórico Completo (CSV)",
             data=csv,
-            file_name=f"historico_requisicoes_pecas_{datetime.now().strftime('%Y%m%d')}.csv",
+            file_name=f"historico_requisicoes_industria40_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv"
         )
     else:
-        st.info("Nenhum evento ou requisição foi registrado ainda.")
+        st.info("Ainda não existem requisições ou registos no histórico.")
